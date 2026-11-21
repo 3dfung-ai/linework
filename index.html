@@ -255,6 +255,19 @@ svg.bg{position:absolute;left:0;top:0;pointer-events:none}
 .gbar i{position:absolute;left:0;top:0;bottom:0;border-radius:2px;background:color-mix(in oklab,var(--accent) 80%,var(--group));pointer-events:none}
 .gbar::before,.gbar::after{content:"";position:absolute;bottom:-5px;border-left:5px solid transparent;border-right:5px solid transparent;border-top:6px solid var(--group)}
 .gbar::before{left:0;border-left:0}
+.gbar.act{height:12px;background:none;border-radius:0}
+.gbar.act::before,.gbar.act::after{top:0;bottom:auto;width:2px;height:12px;border:0;background:var(--group);opacity:.75}
+.gbar.act .tr{position:absolute;left:0;right:0;top:5px;height:2px;border-radius:1px;background:var(--group);opacity:.3;pointer-events:none}
+.gbar.act b{position:absolute;display:block;pointer-events:none;box-sizing:border-box}
+.gbar.act .ac{top:4px;height:4px;border-radius:2px;background:color-mix(in oklab,var(--accent) 55%,transparent)}
+.gbar.act .ad{top:6px;border-radius:50%;border:2px solid var(--accent);background:var(--surface)}
+.gbar.act .as{top:2px;height:8px;border-radius:4px;border:2px solid var(--accent);background:var(--surface)}
+.gbar.act .ad.done,.gbar.act .as.done{background:var(--accent)}
+.agap{position:absolute;z-index:2;transform:translateX(-50%);font-size:10px;line-height:1;color:var(--faint);white-space:nowrap;pointer-events:none}
+.tip .ar{display:flex;align-items:center;gap:7px;margin-top:3px}
+.tip .ar i{flex:none;width:9px;height:9px;border-radius:50%;border:2px solid var(--accent);box-sizing:border-box}
+.tip .ar i.done{background:var(--accent)}
+.tip .ar em{font-style:normal;color:var(--muted);margin-left:auto;padding-left:10px}
 .gbar::after{right:0;border-right:0}
 .blab{position:absolute;z-index:3;display:flex;align-items:center;gap:7px;height:20px;font-size:12px;color:var(--muted);white-space:nowrap;pointer-events:none}
 .blab b{color:var(--ink-2);font-weight:560}
@@ -877,7 +890,7 @@ function defaultSettings() {
   return {
     workdays: BRUNEI_WEEK.slice(), holidays: [],
     prefs: { removeFloat: false, applyLagNow: true, inferLag: false, autoFix: false },
-    zoom: 'day', showCritical: false, baselineId: null, labels: 'assignee',
+    zoom: 'day', showCritical: false, baselineId: null, labels: 'assignee', activity: true,
   };
 }
 function newId(prefix) { return prefix + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
@@ -1553,6 +1566,7 @@ function renderToolbar() {
       <button class="btn primary" data-act="add-task" title="Add task (N)">${ic('plus')}Task</button>
       <button class="btn" data-act="add-ms" title="Add milestone (M)">${ic('diamond')}Milestone</button>
       <button class="btn" data-act="add-group" title="Add group (G)">${ic('group')}Group</button>
+      <button class="btn" data-act="log-today" title="Add a finished one-day task for today, in the selected group (L)">${ic('check')}Log today</button>
     </div>
     <div class="grp">
       <button class="ib" data-act="outdent" aria-label="Outdent" title="Move out of group (Shift+Tab)">${ic('outdent')}</button>
@@ -1573,7 +1587,7 @@ function onToolbar(e) {
   if (b.dataset.zoom) { setZoom(b.dataset.zoom); return; }
   const a = b.dataset.act;
   const map = {
-    'add-task': () => addItem('task'), 'add-ms': () => addItem('milestone'), 'add-group': () => addItem('group'),
+    'add-task': () => addItem('task'), 'add-ms': () => addItem('milestone'), 'add-group': () => addItem('group'), 'log-today': logToday,
     indent: indentSel, outdent: outdentSel, chain: chainSel, today: () => scrollToDay(D.today(), 0.22, true),
     fix: fixInvalid, critical: toggleCritical, baseline: () => baselineMenu(b), display: () => labelsMenu(b),
   };
@@ -1619,7 +1633,8 @@ async function saveBaseline() {
 function labelsMenu(anchor) {
   const P = App.active, cur = P.settings.labels;
   const set = v => () => change(P => { P.settings.labels = v; }, { history: false });
-  openMenu(0, 0, [{ head: 'Beside each bar' }, { label: 'Who’s assigned', checked: cur === 'assignee', act: set('assignee') }, { label: 'Task name', checked: cur === 'name', act: set('name') }, { label: 'Name and assignee', checked: cur === 'both', act: set('both') }, { label: 'Nothing', checked: cur === 'none', act: set('none') }], anchor);
+  openMenu(0, 0, [{ head: 'Beside each bar' }, { label: 'Who’s assigned', checked: cur === 'assignee', act: set('assignee') }, { label: 'Task name', checked: cur === 'name', act: set('name') }, { label: 'Name and assignee', checked: cur === 'both', act: set('both') }, { label: 'Nothing', checked: cur === 'none', act: set('none') },
+    'sep', { head: 'Group bars' }, { label: 'Show the days with work', checked: P.settings.activity !== false, act: () => change(P => { P.settings.activity = P.settings.activity === false; }, { history: false }) }], anchor);
 }
 
 /* ---------- grid ---------- */
@@ -1758,6 +1773,71 @@ function linksSVG(P, pos, W, H, va = 0, vb = Infinity) {
   const mk = c => `<marker id="ah-${c}" viewBox="0 0 10 10" refX="8.6" refY="5" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto"><path class="ah ${c}" d="M1 1.3 9 5 1 8.7z"/></marker>`;
   return `<svg class="links" width="${W}" height="${H}"><defs>${['n', 'bad', 'crit', 'sel'].map(mk).join('')}</defs>${s}</svg>`;
 }
+/* ---------- active days on group bars ---------- */
+/* A group's bar spans first to last task; dots mark the working days its tasks cover.
+   Filled = every task that day is done; hollow = still to do. Idle stretches stay a thin line. */
+function kidsOf(P) { const m = new Map(); for (const t of P.tasks) if (t.parent) { if (!m.has(t.parent)) m.set(t.parent, []); m.get(t.parent).push(t); } return m; }
+function activityOf(g, kids, cal) {
+  const byDay = new Map(), stack = (kids.get(g.id) || []).slice().reverse();
+  while (stack.length) {
+    const k = stack.pop();
+    if (k.type === 'group') { stack.push(...(kids.get(k.id) || []).slice().reverse()); continue; }
+    if (k.type !== 'task') continue;
+    for (let d = k.start; d <= k.end; d++) if (cal.isWork(d)) { let a = byDay.get(d); if (!a) byDay.set(d, a = []); a.push(k); }
+  }
+  const days = [...byDay.keys()].sort((a, b) => a - b);
+  const done = new Map(days.map(d => [d, byDay.get(d).every(t => t.progress >= 100)]));
+  const blocks = [], segs = [];
+  for (const d of days) {
+    const b = blocks[blocks.length - 1];
+    if (b && cal.count(b.e + 1, d - 1) === 0) b.e = d; else blocks.push({ s: d, e: d });
+    const sg = segs[segs.length - 1];
+    if (sg && sg.done === done.get(d) && cal.count(sg.e + 1, d - 1) === 0) sg.e = d; else segs.push({ s: d, e: d, done: done.get(d) });
+  }
+  const gaps = [];
+  for (let i = 1; i < blocks.length; i++) { const s = blocks[i - 1].e + 1, e = blocks[i].s - 1; gaps.push({ s, e, cd: e - s + 1, wd: cal.count(s, e) }); }
+  return { byDay, days, done, blocks, segs, gaps };
+}
+const gapText = n => n < 14 ? `${n}-day gap` : n < 63 ? `${Math.round(n / 7)}-week gap` : `${Math.round(n / 30.4)}-month gap`;
+function actHTML(A, L, dW) {
+  const cx = d => X(d) + dW / 2 - L;
+  let o = '<i class="tr"></i>';
+  if (dW >= 13) {
+    const R = Math.min(10, dW - 3);
+    for (const b of A.blocks) if (b.e > b.s) o += `<b class="ac" style="left:${cx(b.s)}px;width:${(b.e - b.s) * dW}px"></b>`;
+    for (const d of A.days) o += `<b class="ad${A.done.get(d) ? ' done' : ''}" style="left:${cx(d) - R / 2}px;width:${R}px;height:${R}px;margin-top:${-R / 2}px"></b>`;
+  } else {
+    for (const s of A.segs) { const full = (s.e - s.s + 1) * dW, w = Math.max(7, full); o += `<b class="as${s.done ? ' done' : ''}" style="left:${X(s.s) - L + (full - w) / 2}px;width:${w}px"></b>`; }
+  }
+  return o;
+}
+function gapHTML(A, top, dW) {
+  let o = '';
+  for (const g of A.gaps) {
+    if (g.wd < 5 || g.cd * dW < 84) continue;
+    o += `<div class="agap" style="left:${Math.round((X(g.s) + X(g.e + 1)) / 2)}px;top:${top + 25}px">${gapText(g.cd)}</div>`;
+  }
+  return o;
+}
+// what the pointer is over on an active-days bar: a day with work, or an idle gap
+function actHit(id, e) {
+  const A = App.actCache && App.actCache.get(id); if (!A) return null;
+  const g = App.geom, r = EL.cv.getBoundingClientRect(), x = (e.clientX - r.left) / g.dayW, d0 = Math.floor(x) + g.origin;
+  const tol = Math.max(0, Math.ceil(6 / g.dayW));
+  for (let k = 0; k <= tol; k++) for (const d of k ? [d0 - k, d0 + k] : [d0]) if (A.byDay.has(d)) return { key: id + ':' + d, day: d, A };
+  const gi = A.gaps.findIndex(G => d0 >= G.s && d0 <= G.e);
+  return gi >= 0 ? { key: id + ':g' + gi, gap: A.gaps[gi], A } : null;
+}
+function showActTip(hit) {
+  let h;
+  if (hit.gap) { const G = hit.gap; h = `<b>No work planned</b><div>${fd(G.s)} to ${fd(G.e, 'wdmy')}</div><div class="k">${plural(G.cd, 'day')}, ${plural(G.wd, 'working day')}</div>`; }
+  else {
+    const ts = hit.A.byDay.get(hit.day);
+    h = `<b>${fd(hit.day, 'wdmy')}</b>` + ts.map(t => `<div class="ar"><i class="${t.progress >= 100 ? 'done' : ''}"></i><span>${esc(t.name || 'Untitled')}</span>${t.progress < 100 ? `<em>${t.progress}%</em>` : ''}</div>`).join('');
+  }
+  EL.tip.innerHTML = h; EL.tip.hidden = false; placeTip();
+}
+
 function renderChart() {
   const P = App.active, cal = App.cal, g = App.geom, dW = g.dayW, rows = App.rows, b = curBaseline(), crit = App.crit, drag = App.drag;
   const W = Math.ceil((g.end - g.origin + 1) * dW), H = (rows.length + 1) * ROW;
@@ -1782,6 +1862,8 @@ function renderChart() {
     }
   }
   const labels = P.settings.labels || 'assignee';
+  const actOn = P.settings.activity !== false, kids = actOn ? kidsOf(P) : null;
+  App.actCache = new Map();
   for (let i = va; i <= vb; i++) {
     const r = rows[i], t = r.t, top = i * ROW, c = colorOf(t);
     const cls = (App.sel.has(t.id) ? ' sel' : '') + (crit && crit.tasks.has(t.id) ? ' crit' : '') + (badTo.has(t.id) ? ' bad' : '') + (App.pick && App.pick.from === t.id ? ' src' : '') + (t.type === 'milestone' && t.progress >= 100 ? ' done' : '');
@@ -1794,7 +1876,10 @@ function renderChart() {
     if (t.type === 'group') {
       if (t._empty) continue;
       const L = X(t.start), w = Math.max(4, (t.end - t.start + 1) * dW);
-      h += `<div class="gbar${cls}" data-id="${t.id}" data-part="body" style="left:${L}px;width:${w}px;top:${top + 13}px" aria-label="${esc(t.name)}"><i style="width:${t.progress}%"></i></div>`;
+      if (actOn) {
+        const A = activityOf(t, kids, cal); App.actCache.set(t.id, A);
+        h += `<div class="gbar act${cls}" data-id="${t.id}" data-part="body" style="left:${L}px;width:${w}px;top:${top + 12}px" aria-label="${esc(t.name)}: work on ${plural(A.days.length, 'day')} of ${plural(cal.count(t.start, t.end), 'working day')}">${actHTML(A, L, dW)}</div>` + gapHTML(A, top, dW);
+      } else h += `<div class="gbar${cls}" data-id="${t.id}" data-part="body" style="left:${L}px;width:${w}px;top:${top + 13}px" aria-label="${esc(t.name)}"><i style="width:${t.progress}%"></i></div>`;
       right = L + w;
       if (labels === 'name' || labels === 'both') lab = `<b>${esc(t.name)}</b>`;
     } else if (t.type === 'milestone') {
@@ -1862,7 +1947,8 @@ function onCanvasHover(e) {
   const id = b && b.dataset.id;
   if (!id) { hideTip(); return; }
   App.tipXY = [e.clientX, e.clientY];
-  if (id !== tipId) { hideTip(); tipId = id; tipTimer = setTimeout(() => showTip(id), 420); }
+  const ah = b.classList.contains('act') ? actHit(id, e) : null, key = ah ? ah.key : id;
+  if (key !== tipId) { hideTip(); tipId = key; tipTimer = setTimeout(() => ah ? showActTip(ah) : showTip(id), ah ? 150 : 420); }
   else if (!EL.tip.hidden) placeTip();
 }
 function placeTip() {
@@ -2298,6 +2384,9 @@ function addItem(type, opt = {}) {
     else { t.start = t.end = cal.snapF(start); }
     P.tasks.splice(at, 0, t); nid = t.id;
   });
+  revealNew(nid);
+}
+function revealNew(nid) {
   if (!nid) return;
   App.sel = new Set([nid]); App.selAnchor = nid;
   if (App.view === 'gantt') {
@@ -2308,6 +2397,26 @@ function addItem(type, opt = {}) {
     const t = byId(nid); if (t && App.geom) { const x = X(t.start); if (x < EL.cs.scrollLeft || x > EL.cs.scrollLeft + EL.cs.clientWidth - 100) scrollToDay(t.start, 0.3, true); }
     startEdit(nid, 'name');
   } else openDrawer(nid);
+}
+// Record a work session: a finished one-day task dated today, in the selected group
+function logToday() {
+  const P = App.active, cal = App.cal, T = D.today(), dn = WD[D.dow(T)];
+  if (!cal.isWork(T)) {
+    if (P.settings.workdays.includes(D.dow(T))) { toast(`Today is ${cal.holName.get(T) || 'a holiday'} in this project’s calendar, so nothing can be scheduled on it. Remove the holiday under Settings to log work today.`, { ms: 9000 }); return; }
+    toast(`${dn} is a day off in this project’s calendar, so a task can’t sit on it.`, { ms: 10000, action: { label: `Make ${dn} a working day`, fn: () => { change(P => { P.settings.workdays = [...new Set([...P.settings.workdays, D.dow(T)])].sort(); }); logToday(); } } });
+    return;
+  }
+  const sel = lastSel(), grp = sel ? (sel.type === 'group' ? sel : sel.parent ? byId(sel.parent) : null) : null;
+  let nid = null;
+  change(P => {
+    const g = grp && P.tasks.find(x => x.id === grp.id);
+    if (g) g.collapsed = false;
+    const t = mkTask(P, { type: 'task', name: 'Work session', parent: g ? g.id : null, start: T, color: g ? g.color : 'blue' });
+    t.start = t.end = T; t.progress = 100;
+    P.tasks.splice(g ? blockEnd(P, g) + 1 : P.tasks.length, 0, t); nid = t.id;
+  });
+  revealNew(nid);
+  toast(`Logged today${grp ? ' in ' + grp.name : ''}. Type what you did, then press Enter.`);
 }
 async function deleteSel() {
   const P = App.active;
@@ -2854,7 +2963,7 @@ function openHelp() {
   modal({
     title: 'Shortcuts and dependency rules', wide: true, body: `
     <div class="keys">
-      ${k(['N'], 'Add a task below the selection (Enter works too)')}${k(['M'], 'Add a milestone')}${k(['G'], 'Add a group')}
+      ${k(['N'], 'Add a task below the selection (Enter works too)')}${k(['M'], 'Add a milestone')}${k(['G'], 'Add a group')}${k(['L'], 'Log today: a finished one-day task in the selected group')}
       ${k(['Tab'], 'Move the selection into the group above')}${k(['Shift', 'Tab'], 'Move it out of its group')}
       ${k(['Shift', 'D'], 'Link the selected tasks in order, finish to start')}${k(['F2'], 'Rename; double-click any cell to edit it')}
       ${k(['E'], 'Open details')}${k(['Del'], 'Delete the selected tasks or dependency')}
@@ -2864,6 +2973,7 @@ function openHelp() {
     </div>
     <h4 class="sub">On the chart</h4>
     <table class="rules">
+      <tr><td>Group bars</td><td>A group’s bar runs from its first task to its last. Dots mark the days with work: filled when every task that day is done, hollow when still to do. A thin line means no work planned; long stretches show their length. Hover a dot to see that day’s tasks. Turn this off under Labels.</td></tr>
       <tr><td>Move</td><td>Drag a bar. Dragging a group bar moves everything in it. Shift-click to select several and drag them together.</td></tr>
       <tr><td>Resize</td><td>Drag either end of a bar. Durations count working days.</td></tr>
       <tr><td>Progress</td><td>Drag the small marker under a bar, or type a percentage in the Done column.</td></tr>
@@ -3045,6 +3155,7 @@ function onKey(e) {
   if (k === 'Delete' || k === 'Backspace') { if (App.sel.size || App.selLink) { e.preventDefault(); deleteSel(); } return; }
   if (k === 'n' || k === 'N') { e.preventDefault(); addItem('task'); return; }
   if (k === 'e' || k === 'E') { if (one) { e.preventDefault(); openDrawer(one); } return; }
+  if (k === 'l' || k === 'L') { e.preventDefault(); logToday(); return; }
   if (App.view !== 'gantt') return;
   switch (k) {
     case 'Enter': e.preventDefault(); addItem('task'); break;
