@@ -1,5 +1,5 @@
 /* Linework offline cache: the app opens with no internet; data sync is handled by the page. */
-const CACHE = 'linework-e644f69e7c';
+const CACHE = 'linework-89262d24a9';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));

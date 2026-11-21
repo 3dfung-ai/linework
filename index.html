@@ -602,6 +602,7 @@ const FMT = {
 const fd = (n, f = 'wdm') => FMT[f].format(new Date(n * DAY_MS));
 const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const BRUNEI_WEEK = [1, 2, 3, 4, 6];   // Mon–Thu + Sat; Friday and Sunday off
+const ALL_WEEK = [0, 1, 2, 3, 4, 5, 6];  // default for new projects: personal work happens any day
 
 function Cal(settings) {
   const wd = new Array(7).fill(false);
@@ -888,7 +889,7 @@ const App = {
 
 function defaultSettings() {
   return {
-    workdays: BRUNEI_WEEK.slice(), holidays: [],
+    workdays: ALL_WEEK.slice(), holidays: [],
     prefs: { removeFloat: false, applyLagNow: true, inferLag: false, autoFix: false },
     zoom: 'day', showCritical: false, baselineId: null, labels: 'assignee', activity: true,
   };
@@ -1397,7 +1398,7 @@ function demoProjects() {
       link(a, b, type = 'FS', lag = 0) { P.links.push({ id: 'l' + (P.nextId++), from: a.id, to: b.id, type, lag }); },
     };
   };
-  const A = newProject('Chemistry analyser go-live'); A.demo = true; A.settings.holidays = fixedHolidays([y, y + 1]);
+  const A = newProject('Chemistry analyser go-live'); A.demo = true; A.settings.holidays = fixedHolidays([y, y + 1]); A.settings.workdays = BRUNEI_WEEK.slice();
   let cal = Cal(A.settings), b = builder(A, cal);
   b.group('Procurement and installation', 'blue');
   const t1 = b.task('Tender award and purchase order', mon - 21, 4, 'Lab manager');
@@ -1428,7 +1429,7 @@ function demoProjects() {
   A.settings.baselineId = A.baselines[0].id;
   rollup(A, cal);
 
-  const B = newProject('POCT glucose meter rollout'); B.demo = true; B.created = A.created + 1; B.settings.holidays = fixedHolidays([y, y + 1]);
+  const B = newProject('POCT glucose meter rollout'); B.demo = true; B.created = A.created + 1; B.settings.holidays = fixedHolidays([y, y + 1]); B.settings.workdays = BRUNEI_WEEK.slice();
   cal = Cal(B.settings); b = builder(B, cal);
   b.group('Pilot on ward 7', 'green');
   const p1 = b.task('Device selection and evaluation', mon + 7, 6, 'POCT coordinator');
@@ -1444,8 +1445,10 @@ function demoProjects() {
   tighten(B, cal); autoProgress(B, cal, T); rollup(B, cal);
   return [A, B];
 }
-function blankProject(name = 'Untitled project') {
-  const P = newProject(name), cal = Cal(P.settings);
+function blankProject(name = 'Untitled project', workdays) {
+  const P = newProject(name);
+  if (workdays) P.settings.workdays = workdays.slice();
+  const cal = Cal(P.settings);
   const t = mkTask(P, { name: 'First task', start: cal.snapF(D.today()) }); setStart(cal, t, t.start, 3); P.tasks.push(t);
   return P;
 }
@@ -2866,9 +2869,10 @@ async function deleteProject(P) {
 }
 function newProjectDialog() {
   const m = modal({
-    title: 'New project', body: `<label class="field"><span>Project name</span><input class="inp" id="np-name" placeholder="e.g. Ward 3 refurbishment" autofocus></label>
-      <div class="opt-list"><label class="opt"><input type="radio" name="np" value="blank" checked><span><b>Start blank</b><small>One task dated today, Brunei work week, your saved dependency rules.</small></span></label>
-      <label class="opt"><input type="radio" name="np" value="copy"><span><b>Copy the structure of ${esc(App.active ? App.active.name : 'this project')}</b><small>Same groups, tasks and dependencies, starting from today with progress reset.</small></span></label></div>`,
+    title: 'New project', body: `<label class="field"><span>Project name</span><input class="inp" id="np-name" placeholder="e.g. Kitchen shelf, Ward 3 refurbishment" autofocus></label>
+      <div class="field"><span>Working days</span><div class="seg" id="np-wk" role="group" aria-label="Working days"><button type="button" data-wk="all" class="on" aria-pressed="true">Every day</button><button type="button" data-wk="bn" aria-pressed="false">Brunei week</button><button type="button" data-wk="mf" aria-pressed="false">Mon to Fri</button></div></div>
+      <div class="opt-list"><label class="opt"><input type="radio" name="np" value="blank" checked><span><b>Start blank</b><small>One task dated today, with your saved dependency rules.</small></span></label>
+      <label class="opt"><input type="radio" name="np" value="copy"><span><b>Copy the structure of ${esc(App.active ? App.active.name : 'this project')}</b><small>Same groups, tasks, dependencies and working days, starting from today with progress reset.</small></span></label></div>`,
     actions: [{ label: 'Cancel', value: false }, { label: 'Create project', primary: true, act: s => {
       const name = s.querySelector('#np-name').value.trim() || 'Untitled project', how = s.querySelector('input[name=np]:checked').value;
       let P;
@@ -2876,10 +2880,11 @@ function newProjectDialog() {
         P = deserialize(JSON.parse(JSON.stringify(serialize(App.active)))); P.id = newId('p-'); P.name = name; P.created = Date.now(); P.baselines = []; P.settings.baselineId = null; P.demo = false;
         const cal = Cal(P.settings), first = Math.min(...P.tasks.filter(t => t.type !== 'group').map(t => t.start)), w = isFinite(first) ? cal.wdiff(cal.snapF(first), cal.snapF(D.today())) : 0;
         for (const t of P.tasks) { if (t.type !== 'group') setStart(cal, t, cal.addW(cal.snapF(t.start), w)); t.progress = 0; }
-      } else { P = blankProject(name); P.settings.prefs = Object.assign({}, App.active ? App.active.settings.prefs : defaultSettings().prefs); }
+      } else { const wk = (s.querySelector('#np-wk .on') || {}).dataset; P = blankProject(name, { all: ALL_WEEK, bn: BRUNEI_WEEK, mf: [1, 2, 3, 4, 5] }[(wk && wk.wk) || 'all']); P.settings.prefs = Object.assign({}, App.active ? App.active.settings.prefs : defaultSettings().prefs); }
       App.projects.push(P); setActive(P); markDirty(P); setView('gantt');
     } }],
   });
+  m.el.querySelector('#np-wk').addEventListener('click', e => { const b = e.target.closest('[data-wk]'); if (!b) return; m.el.querySelectorAll('#np-wk button').forEach(x => { x.classList.toggle('on', x === b); x.setAttribute('aria-pressed', x === b); }); });
   m.el.querySelector('#np-name').addEventListener('keydown', e => { if (e.key === 'Enter') m.el.querySelector('footer .primary').click(); });
 }
 
